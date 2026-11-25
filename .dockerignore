@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+mlruns
+mlflow.db
+models
+logs
+reports
+docs
+data/processed
+*.pptx

@@ -1,0 +1,46 @@
+# docker compose up --build
+#   1. mlflow  - experiment tracking + model registry UI   -> http://localhost:5000
+#   2. trainer - runs the training pipeline once, then exits
+#   3. api     - starts only after the trainer succeeded   -> http://localhost:8000
+
+services:
+  mlflow:
+    build: .
+    image: bodyfat-mlops:latest
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      retries: 20
+
+  trainer:
+    image: bodyfat-mlops:latest
+    command: python -m src.train
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
+  api:
+    image: bodyfat-mlops:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+    depends_on:
+      trainer:
+        condition: service_completed_successfully
+
+volumes:
+  mlflow_data:

@@ -1,0 +1,75 @@
+name: CI/CD - Body Fat MLOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GIT_PYTHON_REFRESH: quiet
+
+jobs:
+  test:
+    name: 1. Lint + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Code quality (flake8)
+        run: flake8 src api tests scripts
+      - name: Unit tests (pytest)
+        run: pytest -v
+
+  train:
+    name: 2. Train + quality gate
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run training pipeline (fails the build if the quality gate fails)
+        run: python -m src.train
+      - name: Save the trained model as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-model
+          path: models/*.j*
+
+  build:
+    name: 3. Docker build + smoke test
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-model
+          path: models
+      - name: Build image
+        run: docker build -t bodyfat-mlops:${{ github.sha }} .
+      - name: Start container and call the API
+        run: |
+          docker run -d --name api -p 8000:8000 -v "$PWD/models:/app/models" bodyfat-mlops:${{ github.sha }}
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 2; done
+          curl -sf -X POST localhost:8000/predict -H "Content-Type: application/json" \
+            -d '{"age":30,"weight_kg":80,"height_cm":178,"neck_cm":38,"waist_cm":90,"hip_cm":99}'
+
+  deploy:
+    name: 4. Deploy (main branch only)
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Model passed tests, quality gate and smoke test."
+          echo "Deploying commit ${{ github.sha }} (here: simulated; real step = push image to a registry and restart the server)."

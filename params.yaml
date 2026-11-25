@@ -1,0 +1,47 @@
+# One place for every setting of the pipeline.
+# Change a value here, run the pipeline again, and MLflow records the new run.
+
+data:
+  raw_path: data/raw/bodyfat.txt            # original file, never edited by hand
+  clean_path: data/processed/bodyfat_clean.csv
+  test_size: 0.2
+  random_state: 42
+
+validation:
+  # A record outside these limits is physically impossible or a typing error.
+  ranges:
+    age: [18, 90]
+    weight_kg: [40, 200]
+    height_cm: [140, 210]
+    neck_cm: [25, 60]
+    waist_cm: [55, 160]
+    hip_cm: [70, 160]
+    body_fat: [3, 50]
+  # Body fat in the file was calculated from body density with Siri's equation.
+  # If the two disagree by more than this many % points, the record is corrupt.
+  density_tolerance: 1.0
+
+training:
+  experiment_name: bodyfat-prediction
+  registered_model_name: bodyfat-model
+  cv_folds: 5
+  models:
+    linear_regression: {}
+    ridge:
+      alpha: 1.0
+    random_forest:
+      n_estimators: 300
+      max_depth: 6
+      min_samples_leaf: 3
+    gradient_boosting:
+      n_estimators: 200
+      learning_rate: 0.05
+      max_depth: 2
+
+quality_gate:
+  max_mae: 4.5            # average error must be below 4.5 body-fat % points
+  must_beat_navy: true    # and better than the Navy tape formula NutriPlan uses today
+
+monitoring:
+  drift_threshold: 0.5    # a feature has drifted if its mean moves > 0.5 standard deviations
+  min_samples: 20         # don't judge drift on fewer predictions than this

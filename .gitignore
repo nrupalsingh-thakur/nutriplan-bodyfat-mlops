@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+mlruns/
+mlflow.db
+models/
+logs/
+reports/
+data/processed/

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutriPlan Body Fat Predictor</title>
+<style>
+  :root { --bg:#f4f7f5; --card:#fff; --ink:#1d2b24; --muted:#5d6f66; --brand:#2e7d4f; --line:#dfe7e2; --warn:#b5482f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:20px 24px; background:var(--brand); color:#fff; }
+  header h1 { margin:0; font-size:22px; } header p { margin:4px 0 0; opacity:.85; font-size:14px; }
+  main { max-width:980px; margin:0 auto; padding:20px 16px; display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ main{ grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  h2 { margin:0 0 12px; font-size:16px; }
+  label { display:flex; justify-content:space-between; align-items:center; margin:8px 0; font-size:14px; }
+  input { width:110px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:14px; }
+  button { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:10px 14px; font-size:14px; cursor:pointer; margin-top:8px; }
+  button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  .big { font-size:44px; font-weight:700; color:var(--brand); margin:6px 0; }
+  .muted { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  td, th { text-align:left; padding:5px 4px; border-bottom:1px solid var(--line); }
+  .bad { color:var(--warn); font-weight:600; } .ok { color:var(--brand); font-weight:600; }
+  .full { grid-column:1/-1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NutriPlan Body Fat Predictor</h1>
+  <p>Production model served from the MLflow Model Registry · adult men · tape-measure inputs</p>
+</header>
+<main>
+  <section class="card">
+    <h2>Your measurements</h2>
+    <form id="f">
+      <label>Age (years) <input name="age" type="number" value="30" required></label>
+      <label>Weight (kg) <input name="weight_kg" type="number" step="0.1" value="80" required></label>
+      <label>Height (cm) <input name="height_cm" type="number" step="0.1" value="178" required></label>
+      <label>Neck (cm) <input name="neck_cm" type="number" step="0.1" value="38" required></label>
+      <label>Waist at navel (cm) <input name="waist_cm" type="number" step="0.1" value="90" required></label>
+      <label>Hip (cm) <input name="hip_cm" type="number" step="0.1" value="99" required></label>
+      <button type="submit">Predict body fat</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Result</h2>
+    <div id="res" class="muted">Enter measurements and press Predict.</div>
+  </section>
+
+  <section class="card">
+    <h2>Model in production</h2>
+    <div id="info" class="muted">Loading…</div>
+  </section>
+
+  <section class="card">
+    <h2>Monitoring: data drift</h2>
+    <div id="drift" class="muted">Loading…</div>
+    <button class="ghost" onclick="loadDrift()">Refresh</button>
+  </section>
+</main>
+<script>
+const f = document.getElementById('f');
+f.addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = Object.fromEntries([...new FormData(f)].map(([k, v]) => [k, Number(v)]));
+  const r = await fetch('/predict', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json();
+  const res = document.getElementById('res');
+  if (!r.ok) { res.innerHTML = '<span class="bad">' + JSON.stringify(d.detail) + '</span>'; return; }
+  res.innerHTML = `<div class="big">${d.body_fat_pct}%</div>
+    <div class="muted">typical error ±${d.expected_error_pct} % points</div>
+    <table><tr><td>Navy tape formula (current NutriPlan)</td><td>${d.navy_formula_pct}%</td></tr>
+    <tr><td>Model</td><td>${d.model_name} v${d.model_version} (${d.model_type})</td></tr></table>`;
+  loadDrift();
+});
+async function loadInfo() {
+  const r = await fetch('/model-info'); const el = document.getElementById('info');
+  if (!r.ok) { el.textContent = 'No model loaded yet.'; return; }
+  const d = await r.json();
+  el.innerHTML = `<table>
+    <tr><td>Registered model</td><td><b>${d.model_name}</b> version <b>${d.model_version}</b></td></tr>
+    <tr><td>Algorithm</td><td>${d.model_type}</td></tr>
+    <tr><td>Test MAE (model)</td><td class="ok">${d.metrics.test_mae}</td></tr>
+    <tr><td>Test MAE (Navy formula)</td><td>${d.navy_baseline.test_mae}</td></tr>
+    <tr><td>R²</td><td>${d.metrics.test_r2}</td></tr>
+    <tr><td>Trained at</td><td>${d.trained_at}</td></tr>
+    <tr><td>Data version (md5)</td><td>${d.data_md5.slice(0, 10)}…</td></tr></table>`;
+}
+async function loadDrift() {
+  const r = await fetch('/monitoring/drift'); const el = document.getElementById('drift');
+  if (!r.ok) { el.textContent = 'Unavailable.'; return; }
+  const d = await r.json();
+  if (!d.features) { el.textContent = d.message; return; }
+  const rows = Object.entries(d.features).map(([k, v]) =>
+    `<tr><td>${k}</td><td>${v.train_mean}</td><td>${v.live_mean}</td><td class="${v.drift ? 'bad' : 'ok'}">${v.shift_in_std}${v.drift ? ' DRIFT' : ''}</td></tr>`).join('');
+  el.innerHTML = `<div class="${d.status === 'drift' ? 'bad' : 'ok'}">Status: ${d.status.toUpperCase()} · ${d.samples} predictions</div>
+    <table><tr><th>Feature</th><th>Train mean</th><th>Live mean</th><th>Shift (std)</th></tr>${rows}</table>
+    <div class="muted" style="margin-top:6px">${d.advice}</div>`;
+}
+loadInfo(); loadDrift();
+if (location.hash === '#demo') f.requestSubmit();  // auto-run once, used for screenshots
+</script>
+</body>
+</html>
